@@ -1,0 +1,5 @@
+#Environment File:
+.env
+
+#MacOS Finder Metadata
+**/.DS_Store
