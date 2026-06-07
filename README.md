@@ -1,4 +1,4 @@
-# Dependency Threat Monitor 🔍
+# AgentSCM 🔍
 
 An agentic open-source dependency threat detection platform that analyzes your Python project's dependencies, correlates them with live vulnerability intelligence, and prioritizes the ones that need immediate action.
 
@@ -18,11 +18,11 @@ Most vulnerability scanners dump every CVE and leave us to figure out what matte
 
 - Python 3.11+
 - NVD API (CVE data)
-- CISA KEV (active exploitation)
-- FIRST EPSS API (exploit probability)
+- CISA KEV (active exploitation watchlist)
+- FIRST EPSS API (exploit probability scoring)
 - Streamlit (dashboard)
 
-<!--
+
 ## Project structure
 
 ```
@@ -30,23 +30,32 @@ AgentSCM/
 ├── src/
 │   ├── parser.py        # Stage 1: Parse requirements.txt
 │   ├── enricher.py      # Stage 2: Fetch CVE/KEV/EPSS data
-│   ├── scorer.py        # Stage 3: Risk scoring logic
-│   ├── reporter.py      # Stage 4: Findings and recommendations
-│   └── dashboard.py     # Stage 5: Streamlit UI
+│   ├── scorer.py        # Stage 3: Risk scoring and ranking
+│   ├── reporter.py      # Stage 4: Findings and recommendations  [coming soon]
+│   └── dashboard.py     # Stage 5: Streamlit UI                  [coming soon]
 ├── data/
 │   └── samples/         # Sample requirements files for testing
 ├── tests/
-└── docs/
+├── .env                 # Your API keys — never committed
+└── requirements.txt
 ```
--->
 
-## Roadmap
+## Risk scoring
 
-- [x] Stage 1: Parser — requirements.txt ingestion and normalization
-- [ ] Stage 2: Enricher — NVD + KEV + EPSS integration
-- [ ] Stage 3: Scorer — rule-based risk prioritization
-- [ ] Stage 4: Reporter — analyst findings and recommendations
-- [ ] Stage 5: Dashboard — Streamlit UI
+Each package is scored 0–100 based on four signals:
+
+| Signal | Points |
+|---|---|
+| Critical CVE (CVSS 9–10) | 40 |
+| High CVE (CVSS 7–8.9) | 25 |
+| Medium CVE (CVSS 4–6.9) | 10 |
+| In CISA KEV (actively exploited) | +30 |
+| High EPSS >70% | +20 |
+| Moderate EPSS 40–70% | +10 |
+| Version not pinned | +5 |
+
+Scores map to: 🔴 CRITICAL (70+) · 🟠 HIGH (40–69) · 🟡 MEDIUM (15–39) · 🟢 LOW (0–14)
+
 
 ## Setup
 
@@ -54,9 +63,22 @@ AgentSCM/
 git clone https://github.com/1n51d10u5-ip/AgentSCM
 cd AgentSCM
 pip install -r requirements.txt
-python src/parser.py data/samples/requirements.txt
+python src/parser.py requirements.txt
 ```
 
+Create a `.env` file in the project root:
+```
+NVD_API_KEY=your-key-here
+```
+
+Get a free NVD API key at: https://nvd.nist.gov/developers/request-an-api-key
+
+Add the '.env' to '.gitignore'
+
+Then run:
+```bash
+python src/enricher.py data/samples/requirements.txt
+```
 ---
 
-Built as a portfolio project demonstrating supply-chain security analysis, threat intelligence enrichment, and detection engineering principles.
+Built as a project demonstrating supply-chain security analysis, threat intelligence enrichment, and detection engineering principles.
