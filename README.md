@@ -119,3 +119,38 @@ Results are printed to terminal and saved to `data/results.json`.
 ---
 
 Built as a project demonstrating supply-chain security analysis, threat intelligence enrichment, and detection engineering principles.
+
+
+## Feature roadmap (MoSCoW)
+ 
+### 🔵 Must have
+| Feature | Reason |
+|---|---|
+| Streamlit dashboard | Makes it demo-able; file upload + visual risk breakdown |
+| `poetry.lock` support | Most modern Python projects support |
+| Exportable JSON report | Already built, needs dashboard download button |
+| GitHub Actions CI integration | Run AgentSCM on every PR; for DevSecOps workflow |
+ 
+### 🟢 Should have
+| Feature | Reason |
+|---|---|
+| npm / package-lock.json support | Expands beyond Python, making it ecosystem-agnostic |
+| Remediation suggestions per package | Patched version or safe alternative recommendation per finding |
+| Dependency graph view | Visualize direct vs transitive risk paths |
+| CycloneDX SBOM input | Formal SBOM support for enterprise and DevSecOps credibility |
+ 
+### 🟡 Could have
+| Feature | Reason |
+|---|---|
+| Fresh exploit signal ingestion | Paste a CVE or advisory and checks if packages are affected |
+| LLM-generated analyst brief | Natural language summary of top risks and recommended actions |
+| Package maintainer health signals | Last release date, contributor count, staleness risk |
+| Typosquatting detection | Flag packages with names suspiciously similar to popular libraries |
+| Live Twitter/X scraping | Brittle and API-restricted; manual signal input covers the concept cleanly |
+
+### ⚫ Won't have (this version)
+| Feature | Reason |
+|---|---|
+| ML-based scoring | Rule-based is explainable and sufficient; ML adds complexity without value here |
+| Auto-patching / PR creation | A step out into remediation automation |
+| Multi-tenant / SaaS mode | In case someday envision this as product |
