@@ -31,8 +31,8 @@ AgentSCM/
 │   ├── parser.py        # Stage 1: Parse requirements.txt
 │   ├── enricher.py      # Stage 2: Fetch CVE/KEV/EPSS data
 │   ├── scorer.py        # Stage 3: Risk scoring and ranking
-│   ├── reporter.py      # Stage 4: Findings and recommendations  [coming soon]
-│   └── dashboard.py     # Stage 5: Streamlit UI                  [coming soon]
+│   ├── pipeline.py      # Stage 4: Wires all stages, main entry point
+│   └── dashboard.py     # Stage 5: Streamlit UI        [coming soon]
 ├── data/
 │   └── samples/         # Sample requirements files for testing
 ├── tests/
@@ -56,6 +56,38 @@ Each package is scored 0–100 based on four signals:
 
 Scores map to: 🔴 CRITICAL (70+) · 🟠 HIGH (40–69) · 🟡 MEDIUM (15–39) · 🟢 LOW (0–14)
 
+## Sample output
+ 
+```
+  AgentSCM — Risk Score Report
+  ────────────────────────────────────────────────────────────
+  #    PACKAGE                   SCORE    LABEL      CVEs
+  ---- ------------------------- -------- ---------- ----
+  1    pillow (==9.0.0)          90       🔴 CRITICAL  3
+  2    requests (==2.28.1)       35       🟡 MEDIUM    1
+  3    django (==3.2.0)          10       🟢 LOW       2
+  4    numpy (unpinned)           5       🟢 LOW       0
+ 
+  AgentSCM — Recommended Actions
+  ────────────────────────────────────────────────────────────
+  🔴 CRITICAL — Patch or mitigate immediately
+     • pillow
+ 
+  🟡 MEDIUM — Review and plan remediation
+     • requests
+ 
+  🟢 LOW — Monitor, no immediate action
+     • django
+     • numpy
+```
+
+## Roadmap
+ 
+- [x] Stage 1: Parser — requirements.txt ingestion and normalization
+- [x] Stage 2: Enricher — NVD + KEV + EPSS integration
+- [x] Stage 3: Scorer — rule-based risk prioritization and ranking
+- [x] Stage 4: Pipeline — full end-to-end wiring with action summary
+- [ ] Stage 5: Dashboard — Streamlit UI
 
 ## Setup
 
@@ -75,10 +107,15 @@ Get a free NVD API key at: https://nvd.nist.gov/developers/request-an-api-key
 
 Add the '.env' to '.gitignore'
 
-Then run:
+## Usage
+ 
+Run the full pipeline on any `requirements.txt`:
+ 
 ```bash
-python src/enricher.py data/samples/requirements.txt
+python src/pipeline.py /path/to/your/project/requirements.txt
 ```
+ 
+Results are printed to terminal and saved to `data/results.json`.
 ---
 
 Built as a project demonstrating supply-chain security analysis, threat intelligence enrichment, and detection engineering principles.
