@@ -139,7 +139,7 @@ Built as a project demonstrating supply-chain security analysis, threat intellig
 | Dependency graph view | Visualize direct vs transitive risk paths |
 | CycloneDX SBOM input | Formal SBOM support for enterprise and DevSecOps credibility |
  
-### 🟡 Could have
+### 🟡 Could have (next version)
 | Feature | Reason |
 |---|---|
 | Fresh exploit signal ingestion | Paste a CVE or advisory and checks if packages are affected |
@@ -147,8 +147,10 @@ Built as a project demonstrating supply-chain security analysis, threat intellig
 | Package maintainer health signals | Last release date, contributor count, staleness risk |
 | Typosquatting detection | Flag packages with names suspiciously similar to popular libraries |
 | Live Twitter/X scraping | Brittle and API-restricted; manual signal input covers the concept cleanly |
+| Dependency graph view | Visualize direct vs transitive risk paths |
+| CycloneDX SBOM input | Formal SBOM support for enterprise and DevSecOps credibility |
 
-### ⚫ Won't have (this version)
+### ⚫ Won't have
 | Feature | Reason |
 |---|---|
 | ML-based scoring | Rule-based is explainable and sufficient; ML adds complexity without value here |
