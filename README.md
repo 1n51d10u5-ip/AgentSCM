@@ -14,6 +14,10 @@ An agentic open-source dependency threat detection platform that analyzes your P
 
 Most vulnerability scanners dump every CVE and leave us to figure out what matters. This tool prioritizes a CVE that's being actively exploited and has a 90% EPSS score is not the same as a theoretical low-severity issue from 3 years ago.
 
+## Dashboard
+
+![AgentSCM Dashboard](docs/dashboard_screenshot_1.png)
+
 ## Tech stack
 
 - Python 3.11+
