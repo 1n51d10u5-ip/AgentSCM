@@ -32,7 +32,7 @@ AgentSCM/
 │   ├── enricher.py      # Stage 2: Fetch CVE/KEV/EPSS data
 │   ├── scorer.py        # Stage 3: Risk scoring and ranking
 │   ├── pipeline.py      # Stage 4: Wires all stages, main entry point
-│   └── dashboard.py     # Stage 5: Streamlit UI        [coming soon]
+│   └── dashboard.py     # Stage 5: Streamlit dashboard
 ├── data/
 │   └── samples/         # Sample requirements files for testing
 ├── tests/
@@ -55,6 +55,51 @@ Each package is scored 0–100 based on four signals:
 | Version not pinned | +5 |
 
 Scores map to: 🔴 CRITICAL (70+) · 🟠 HIGH (40–69) · 🟡 MEDIUM (15–39) · 🟢 LOW (0–14)
+
+## Roadmap
+ 
+- [x] Stage 1: Parser — requirements.txt ingestion and normalization
+- [x] Stage 2: Enricher — NVD + KEV + EPSS integration
+- [x] Stage 3: Scorer — rule-based risk prioritization and ranking
+- [x] Stage 4: Pipeline — full end-to-end wiring with action summary
+- [x] Stage 5: Dashboard — Streamlit UI
+
+## Setup
+
+```bash
+git clone https://github.com/1n51d10u5-ip/AgentSCM
+cd AgentSCM
+pip install -r requirements.txt #To install this program's dependencies
+
+```
+
+Create a `.env` file in the project root:
+```
+NVD_API_KEY=your-key-here
+```
+
+Get a free NVD API key at: https://nvd.nist.gov/developers/request-an-api-key
+
+Add the '.env' to '.gitignore'
+
+## Usage
+ 
+Run the full pipeline on any `requirements.txt`:
+ 
+```bash
+python src/pipeline.py data/samples/requirements.txt
+python src/pipeline.py </path/to/your/project/requirements.txt>
+```
+ 
+Results are printed to terminal and saved to `data/results.json`.
+
+Or launch the interactive dashboard:
+ 
+```bash
+streamlit run src/dashboard.py
+```
+ 
+Then open http://localhost:8501 in your browser. Upload any `requirements.txt` or click "Run with sample file" to see a demo.
 
 ## Sample output
  
@@ -80,42 +125,6 @@ Scores map to: 🔴 CRITICAL (70+) · 🟠 HIGH (40–69) · 🟡 MEDIUM (15–3
      • django
      • numpy
 ```
-
-## Roadmap
- 
-- [x] Stage 1: Parser — requirements.txt ingestion and normalization
-- [x] Stage 2: Enricher — NVD + KEV + EPSS integration
-- [x] Stage 3: Scorer — rule-based risk prioritization and ranking
-- [x] Stage 4: Pipeline — full end-to-end wiring with action summary
-- [ ] Stage 5: Dashboard — Streamlit UI
-
-## Setup
-
-```bash
-git clone https://github.com/1n51d10u5-ip/AgentSCM
-cd AgentSCM
-pip install -r requirements.txt
-python src/parser.py requirements.txt
-```
-
-Create a `.env` file in the project root:
-```
-NVD_API_KEY=your-key-here
-```
-
-Get a free NVD API key at: https://nvd.nist.gov/developers/request-an-api-key
-
-Add the '.env' to '.gitignore'
-
-## Usage
- 
-Run the full pipeline on any `requirements.txt`:
- 
-```bash
-python src/pipeline.py /path/to/your/project/requirements.txt
-```
- 
-Results are printed to terminal and saved to `data/results.json`.
 ---
 
 Built as a project demonstrating supply-chain security analysis, threat intelligence enrichment, and detection engineering principles.
@@ -144,7 +153,7 @@ Built as a project demonstrating supply-chain security analysis, threat intellig
 |---|---|
 | Fresh exploit signal ingestion | Paste a CVE or advisory and checks if packages are affected |
 | LLM-generated analyst brief | Natural language summary of top risks and recommended actions |
-| Package maintainer health signals | Last release date, contributor count, staleness risk |
+| Package maintainer health signals | Last release date with contributor count and staleness risk |
 | Typosquatting detection | Flag packages with names suspiciously similar to popular libraries |
 | Live Twitter/X scraping | Brittle and API-restricted; manual signal input covers the concept cleanly |
 | Dependency graph view | Visualize direct vs transitive risk paths |
