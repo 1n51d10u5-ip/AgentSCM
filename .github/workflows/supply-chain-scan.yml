@@ -1,0 +1,80 @@
+# AgentSCM — Supply Chain Security Scan
+# Runs on every push and pull request.
+# Fails the workflow if any CRITICAL risk packages are found.
+
+name: Supply Chain Scan
+
+on:
+  push:
+    branches: ["main", "dev"]
+    paths:
+      - "requirements.txt"        # only re-scan when dependencies change
+      - "data/samples/requirements.txt"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "requirements.txt"
+  workflow_dispatch:              # allow manual trigger from GitHub UI
+
+jobs:
+  agentscm-scan:
+    name: AgentSCM Dependency Risk Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run AgentSCM pipeline
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}   # set this in repo Settings > Secrets
+        run: |
+          python src/pipeline.py data/samples/requirements.txt
+
+      - name: Upload risk report as artifact
+        uses: actions/upload-artifact@v4
+        if: always()                                 # upload even if scan fails
+        with:
+          name: agentscm-risk-report
+          path: data/results.json
+          retention-days: 30
+
+      - name: Fail if CRITICAL packages found
+        run: |
+          python - << 'PYEOF'
+          import json, sys
+
+          try:
+              with open("data/results.json") as f:
+                  results = json.load(f)
+          except FileNotFoundError:
+              print("No results file found — pipeline may have failed.")
+              sys.exit(1)
+
+          critical = [
+              p for p in results
+              if p.get("score", {}).get("label") == "CRITICAL"
+          ]
+
+          if critical:
+              print(f"\n🔴 CRITICAL packages found — blocking merge:\n")
+              for p in critical:
+                  s = p["score"]
+                  kev = " ⚠ IN KEV" if p["findings"]["any_kev"] else ""
+                  print(f"  • {p['name']} — Score {s['total']}/100{kev}")
+                  for reason in s["reasons"]:
+                      print(f"    - {reason}")
+              print(f"\nResolve these before merging. Download the full report from Actions artifacts.")
+              sys.exit(1)
+          else:
+              print("✅ No CRITICAL packages found. Supply chain scan passed.")
+              sys.exit(0)
+          PYEOF
