@@ -5,7 +5,6 @@ Stage 5: Streamlit dashboard for AgentSCM.
 
 Run with:
     streamlit run src/dashboard.py
-    check with <http://localhost:8501> in your browser
 
 Features:
     - Upload requirements.txt
@@ -29,6 +28,7 @@ from src.parser import parse_requirements
 from src.enricher import EnricherConfig, enrich_all
 from src.scorer import score_all
 from src.pipeline import print_action_summary, save_results
+from src.remediation import add_remediation
 
 load_dotenv()
 
@@ -114,6 +114,7 @@ def run_pipeline(file_path: str, nvd_api_key: str) -> list:
     config = EnricherConfig(nvd_api_key=nvd_api_key)
     enriched = enrich_all(packages, config)
     scored = score_all(enriched)
+    scored = add_remediation(scored)
     return scored, len(skipped)
 
 
@@ -164,17 +165,20 @@ def render_results(scored: list, skipped_count: int) -> None:
         f = p["findings"]
         version = f"{p.get('version_spec','') or ''}{p.get('version','') or ''}".strip() or "unpinned"
         kev = "⚠️ Yes" if f["any_kev"] else "—"
+        rem = p.get("remediation", {})
         table_data.append({
-            "#":        i,
-            "Package":  p["name"],
-            "Version":  version,
-            "Score":    s["total"],
-            "Risk":     f"{s['emoji']} {s['label']}",
-            "CVEs":     f["total_cves"],
-            "CVSS":     f["highest_cvss"] or "—",
-            "EPSS":     f"{f['highest_epss']:.0%}" if f["highest_epss"] else "—",
-            "In KEV":   kev,
-            "Pinned":   "✓" if p.get("pinned") else "✗",
+            "#":           i,
+            "Package":     p["name"],
+            "Version":     version,
+            "Score":       s["total"],
+            "Risk":        f"{s['emoji']} {s['label']}",
+            "CVEs":        f["total_cves"],
+            "CVSS":        f["highest_cvss"] or "—",
+            "EPSS":        f"{f['highest_epss']:.0%}" if f["highest_epss"] else "—",
+            "In KEV":      kev,
+            "Pinned":      "✓" if p.get("pinned") else "✗",
+            "Action":      rem.get("action", "—"),
+            "Fix":         rem.get("suggestion", "—"),
         })
 
     st.dataframe(
@@ -220,6 +224,15 @@ def render_results(scored: list, skipped_count: int) -> None:
                     for factor, points in breakdown.items():
                         if points > 0:
                             st.markdown(f"- `{factor}`: +{points} pts")
+
+                rem = p.get("remediation", {})
+                if rem and rem.get("action") != "NO ACTION":
+                    st.markdown("**Remediation:**")
+                    st.info(
+                        f"**{rem['action']}** — {rem['reason']}\n\n"
+                        f"```\n{rem['suggestion']}\n```"
+                        + (f"\n\nLatest available: `{rem['latest']}`" if rem.get("latest") else "")
+                    )
 
                 if f["cves"]:
                     st.markdown("**Top CVEs:**")

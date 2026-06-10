@@ -1,5 +1,9 @@
 # AgentSCM 🔍
 
+![Supply Chain Scan](https://github.com/1n51d10u5-ip/AgentSCM/actions/workflows/supply-chain-scan.yml/badge.svg)
+![Python](https://img.shields.io/badge/python-3.11+-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 An agentic open-source dependency threat detection platform that analyzes your Python project's dependencies, correlates them with live vulnerability intelligence, and prioritizes the ones that need immediate action.
 
 ## What it does
@@ -17,7 +21,7 @@ Most vulnerability scanners dump every CVE and leave us to figure out what matte
 ## Dashboard
 
 ![AgentSCM Dashboard](docs/dashboard_screenshot_1.png)
-
+ 
 ## Tech stack
 
 - Python 3.11+
@@ -36,7 +40,8 @@ AgentSCM/
 │   ├── enricher.py      # Stage 2: Fetch CVE/KEV/EPSS data
 │   ├── scorer.py        # Stage 3: Risk scoring and ranking
 │   ├── pipeline.py      # Stage 4: Wires all stages, main entry point
-│   └── dashboard.py     # Stage 5: Streamlit dashboard
+│   ├── dashboard.py     # Stage 5: Streamlit dashboard
+│   └── remediation.py   # Stage 6: PyPI latest version + remediation suggestions 
 ├── data/
 │   └── samples/         # Sample requirements files for testing
 ├── tests/
@@ -92,7 +97,7 @@ Run the full pipeline on any `requirements.txt`:
  
 ```bash
 python src/pipeline.py data/samples/requirements.txt
-python src/pipeline.py </path/to/your/project/requirements.txt>
+python src/pipeline.py /path/to/your/project/requirements.txt
 ```
  
 Results are printed to terminal and saved to `data/results.json`.
@@ -129,26 +134,45 @@ Then open http://localhost:8501 in your browser. Upload any `requirements.txt` o
      • django
      • numpy
 ```
+
+## Sample output
+
+AgentSCM — Remediation Report
+  ────────────────────────────────────────────────────────────
+  🔴 pillow
+     Action  : UPGRADE IMMEDIATELY
+     Reason  : Actively exploited vulnerability
+     Fix     : pillow==12.2.0
+  🟡 requests
+     Action  : UPGRADE
+     Reason  : Newer version available
+     Fix     : requests==2.34.2
+  🟢 numpy
+     Action  : PIN VERSION
+     Reason  : Unpinned dependency can silently upgrade
+     Fix     : numpy==2.4.6
+  ✅ 1 package(s) need no action: django
+
 ---
 
 Built as a project demonstrating supply-chain security analysis, threat intelligence enrichment, and detection engineering principles.
 
 
-## Feature roadmap (MoSCoW)
+## Feature Roadmap 
  
 ### 🔵 Must have
 | Feature | Reason |
 |---|---|
-| Streamlit dashboard | Makes it demo-able; file upload + visual risk breakdown |
-| `poetry.lock` support | Most modern Python projects support |
-| Exportable JSON report | Already built, needs dashboard download button |
-| GitHub Actions CI integration | Run AgentSCM on every PR; for DevSecOps workflow |
+| Streamlit dashboard | ✅ Done |
+| Remediation suggestions per package | ✅ Done |
+| Exportable JSON report | ✅ Done |
+| GitHub Actions CI integration | ✅ Done |
  
-### 🟢 Should have
+### 🟢 Should have (next version)
 | Feature | Reason |
 |---|---|
 | npm / package-lock.json support | Expands beyond Python, making it ecosystem-agnostic |
-| Remediation suggestions per package | Patched version or safe alternative recommendation per finding |
+| `poetry.lock` support | Most modern Python projects support |
 | Dependency graph view | Visualize direct vs transitive risk paths |
 | CycloneDX SBOM input | Formal SBOM support for enterprise and DevSecOps credibility |
  

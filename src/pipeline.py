@@ -9,6 +9,7 @@ Wires all three stages together in sequence:
     Stage 3: scorer   — ranks packages by risk
 
 Usage:
+    python src/pipeline.py data/samples/requirements.txt
     python src/pipeline.py /path/to/your/requirements.txt
 """
 
@@ -23,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.parser import parse_requirements, summarize_parse
 from src.enricher import EnricherConfig, enrich_all, print_enrichment_summary
 from src.scorer import score_all, print_score_report
+from src.remediation import add_remediation, print_remediation_report
 
 
 def run_pipeline(file_path: str, nvd_api_key: str = "") -> list:
@@ -62,6 +64,11 @@ def run_pipeline(file_path: str, nvd_api_key: str = "") -> list:
     print("  [Stage 3/3] Scoring and ranking packages...")
     scored = score_all(enriched)
     print_score_report(scored)
+
+    # ── Stage 4: Remediation ────────────────────────────────────────
+    print("  [Stage 4/4] Generating remediation suggestions...")
+    scored = add_remediation(scored)
+    print_remediation_report(scored)
 
     return scored
 
@@ -144,6 +151,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("\n  Usage: python src/pipeline.py <path/to/requirements.txt>")
+        print("  Example: python src/pipeline.py data/samples/requirements.txt\n")
         sys.exit(1)
 
     file_path = sys.argv[1]
