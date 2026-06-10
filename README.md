@@ -65,14 +65,6 @@ Each package is scored 0–100 based on four signals:
 
 Scores map to: 🔴 CRITICAL (70+) · 🟠 HIGH (40–69) · 🟡 MEDIUM (15–39) · 🟢 LOW (0–14)
 
-## Roadmap
- 
-- [x] Stage 1: Parser — requirements.txt ingestion and normalization
-- [x] Stage 2: Enricher — NVD + KEV + EPSS integration
-- [x] Stage 3: Scorer — rule-based risk prioritization and ranking
-- [x] Stage 4: Pipeline — full end-to-end wiring with action summary
-- [x] Stage 5: Dashboard — Streamlit UI
-
 ## Setup
 
 ```bash
@@ -135,7 +127,7 @@ Then open http://localhost:8501 in your browser. Upload any `requirements.txt` o
      • numpy
 ```
 
-## Sample output
+## Sample remediation output
 
 AgentSCM — Remediation Report
   ────────────────────────────────────────────────────────────
@@ -143,14 +135,17 @@ AgentSCM — Remediation Report
      Action  : UPGRADE IMMEDIATELY
      Reason  : Actively exploited vulnerability
      Fix     : pillow==12.2.0
+
   🟡 requests
      Action  : UPGRADE
      Reason  : Newer version available
      Fix     : requests==2.34.2
+
   🟢 numpy
      Action  : PIN VERSION
      Reason  : Unpinned dependency can silently upgrade
      Fix     : numpy==2.4.6
+
   ✅ 1 package(s) need no action: django
 
 ---
