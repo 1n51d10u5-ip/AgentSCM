@@ -127,27 +127,6 @@ Then open http://localhost:8501 in your browser. Upload any `requirements.txt` o
      • numpy
 ```
 
-## Sample remediation output
-
-AgentSCM — Remediation Report
-  ────────────────────────────────────────────────────────────
-  🔴 pillow
-     Action  : UPGRADE IMMEDIATELY
-     Reason  : Actively exploited vulnerability
-     Fix     : pillow==12.2.0
-
-  🟡 requests
-     Action  : UPGRADE
-     Reason  : Newer version available
-     Fix     : requests==2.34.2
-
-  🟢 numpy
-     Action  : PIN VERSION
-     Reason  : Unpinned dependency can silently upgrade
-     Fix     : numpy==2.4.6
-
-  ✅ 1 package(s) need no action: django
-
 ---
 
 Built as a project demonstrating supply-chain security analysis, threat intelligence enrichment, and detection engineering principles.
