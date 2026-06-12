@@ -20,7 +20,6 @@ import os
 import time
 import requests
 from dataclasses import dataclass, field
-from dotenv import load_dotenv
 
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -99,8 +98,17 @@ def fetch_nvd_cves(package: dict, config: EnricherConfig) -> list:
     if config.nvd_api_key:
         headers["apiKey"] = config.nvd_api_key
 
+    # For npm packages with generic names (express, moment, etc.), bias the
+    # search toward npm-specific CVEs to reduce false positives. PyPI package
+    # names are usually distinctive enough that this isn't needed.
+    ecosystem = package.get("ecosystem", "pypi")
+    if ecosystem == "npm":
+        keyword = f"npm {package['name']}"
+    else:
+        keyword = package["name"]
+
     params = {
-        "keywordSearch": package["name"],
+        "keywordSearch": keyword,
         "resultsPerPage": 10,
     }
 
@@ -280,6 +288,8 @@ def print_enrichment_summary(enriched_packages: list) -> None:
 if __name__ == "__main__":
     import sys
     import json
+    from dotenv import load_dotenv
+
     sys.path.insert(0, ".")
     from src.parser import parse_requirements
 
@@ -308,7 +318,3 @@ if __name__ == "__main__":
     with open(output_path, "w") as f:
         json.dump(enriched, f, indent=2)
     print(f"  Full enriched data saved to: {output_path}\n")
-
-# NOTE: The __main__ block below is for quick manual testing only.
-# For real runs, use: from src.config import load_config
-# That loads your NVD key from .env cleanly without exposing it.

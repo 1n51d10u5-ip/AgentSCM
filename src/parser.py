@@ -98,6 +98,8 @@ def parse_requirements(file_path: str) -> list[dict]:
             "version": version if version else None,
             "version_spec": version_spec if version_spec else None,
             "raw_line": raw_line.strip(),
+            "ecosystem": "pypi",
+            "is_direct": True,  # requirements.txt entries are all direct by convention
             "pinned": version_spec == "==" and bool(version)
         })
 

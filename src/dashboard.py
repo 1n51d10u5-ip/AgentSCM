@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.parser import parse_requirements
 from src.enricher import EnricherConfig, enrich_all
 from src.scorer import score_all
-from src.pipeline import print_action_summary, save_results
+from src.pipeline import print_action_summary, save_results, detect_and_parse
 from src.remediation import add_remediation
 
 load_dotenv()
@@ -91,31 +91,33 @@ with st.sidebar:
 
 # ── File upload ────────────────────────────────────────────────────────────────
 
-st.subheader("📂 Upload your requirements.txt")
+st.subheader("📂 Upload your dependency file")
 
 col1, col2 = st.columns([2, 1])
 
 with col1:
     uploaded_file = st.file_uploader(
-        "Drop your requirements.txt here",
-        type=["txt"],
-        help="Standard requirements.txt format. Pinned (==) and unpinned packages both supported."
+        "Drop your requirements.txt or package-lock.json here",
+        type=["txt", "json"],
+        help="Supports Python (requirements.txt) and npm (package-lock.json). "
+             "For npm, lockfile v2/v3 (npm 7+) required for accurate results."
     )
 
 with col2:
     st.markdown("**Don't have one handy?**")
-    use_sample = st.button("▶ Run with sample file", use_container_width=True)
+    use_sample = st.button("▶ Run with sample (Python)", use_container_width=True)
+    use_sample_npm = st.button("▶ Run with sample (npm)", use_container_width=True)
 
 # ── Pipeline execution ─────────────────────────────────────────────────────────
 
-def run_pipeline(file_path: str, nvd_api_key: str) -> list:
-    """Run full AgentSCM pipeline and return scored packages."""
-    packages, skipped = parse_requirements(file_path)
+def run_pipeline(file_path: str, nvd_api_key: str) -> tuple:
+    """Run full AgentSCM pipeline and return scored packages + metadata."""
+    packages, skipped, ecosystem_label = detect_and_parse(file_path)
     config = EnricherConfig(nvd_api_key=nvd_api_key)
     enriched = enrich_all(packages, config)
     scored = score_all(enriched)
     scored = add_remediation(scored)
-    return scored, len(skipped)
+    return scored, len(skipped), ecosystem_label
 
 
 def render_results(scored: list, skipped_count: int) -> None:
@@ -293,23 +295,26 @@ def render_results(scored: list, skipped_count: int) -> None:
 
 # ── Main flow ──────────────────────────────────────────────────────────────────
 
-if uploaded_file or use_sample:
+if uploaded_file or use_sample or use_sample_npm:
     with st.spinner("Running AgentSCM pipeline — fetching CVE, KEV, and EPSS data..."):
         try:
-            if use_sample:
-                file_path = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    "data", "samples", "requirements.txt"
-                )
-            else:
-                # Write uploaded file to a temp file so parser can read it
-                with tempfile.NamedTemporaryFile(
-                    mode="wb", suffix=".txt", delete=False
-                ) as tmp:
-                    tmp.write(uploaded_file.read())
-                    file_path = tmp.name
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-            scored, skipped_count = run_pipeline(file_path, nvd_api_key=nvd_key)
+            if use_sample:
+                file_path = os.path.join(project_root, "data", "samples", "requirements.txt")
+            elif use_sample_npm:
+                file_path = os.path.join(project_root, "data", "samples", "package-lock.json")
+            else:
+                # Write uploaded file to a temp dir, preserving the original
+                # filename — detect_and_parse() routes based on exact name
+                # (e.g. "package-lock.json" vs "requirements.txt")
+                tmp_dir = tempfile.mkdtemp()
+                file_path = os.path.join(tmp_dir, uploaded_file.name)
+                with open(file_path, "wb") as f:
+                    f.write(uploaded_file.read())
+
+            scored, skipped_count, ecosystem_label = run_pipeline(file_path, nvd_api_key=nvd_key)
+            st.caption(f"📦 Detected: **{ecosystem_label}**")
             render_results(scored, skipped_count)
 
         except (FileNotFoundError, ValueError) as e:
@@ -320,7 +325,7 @@ if uploaded_file or use_sample:
 
 else:
     # Landing state — show instructions
-    st.info("👆 Upload a requirements.txt file above, or click 'Run with sample file' to see a demo.")
+    st.info("👆 Upload a requirements.txt or package-lock.json above, or click 'Run with sample file' to see a demo.")
 
     st.markdown("""
     **What AgentSCM checks for:**
@@ -330,5 +335,13 @@ else:
     | CVEs | NVD | Known vulnerabilities in this package version |
     | Active exploitation | CISA KEV | Vulnerability being exploited in the wild right now |
     | Exploit probability | FIRST EPSS | Likelihood of exploitation in the next 30 days |
-    | Version pinning | requirements.txt | Unpinned packages can silently upgrade to vulnerable versions |
+    | Version pinning | requirements.txt / lockfile | Unpinned packages can silently upgrade to vulnerable versions |
+
+    **Supported ecosystems:**
+
+    | Ecosystem | File | Notes |
+    |---|---|---|
+    | Python | `requirements.txt` | Pinned (`==`) and unpinned packages |
+    | npm | `package-lock.json` | Lockfile v2/v3 (npm 7+) — exact resolved versions, direct + transitive |
+    | npm | `package.json` | Fallback — direct dependencies only, version ranges (less precise) |
     """)

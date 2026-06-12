@@ -3,28 +3,57 @@ pipeline.py
 -----------
 The main entry point for AgentSCM.
 
-Wires all three stages together in sequence:
-    Stage 1: parser   — reads requirements.txt
-    Stage 2: enricher — fetches CVE / KEV / EPSS data
-    Stage 3: scorer   — ranks packages by risk
+Auto-detects the dependency file type and routes to the right parser:
+    requirements.txt   -> Python / PyPI ecosystem
+    package-lock.json  -> npm / JavaScript ecosystem
+    package.json       -> npm fallback (direct deps only, version ranges)
+
+Then wires all stages together:
+    Stage 1: parser      — reads dependency file
+    Stage 2: enricher     — fetches CVE / KEV / EPSS data
+    Stage 3: scorer       — ranks packages by risk
+    Stage 4: remediation  — fetches latest safe version + recommended action
 
 Usage:
     python src/pipeline.py data/samples/requirements.txt
-    python src/pipeline.py /path/to/your/requirements.txt
+    python src/pipeline.py data/samples/package-lock.json
+    python src/pipeline.py /path/to/your/dependency/file
 """
 
 import os
 import sys
 import json
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Make sure src/ is importable when running from project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.parser import parse_requirements, summarize_parse
+from src.parser_npm import parse_package_lock, parse_package_json
 from src.enricher import EnricherConfig, enrich_all, print_enrichment_summary
 from src.scorer import score_all, print_score_report
 from src.remediation import add_remediation, print_remediation_report
+
+
+def detect_and_parse(file_path: str):
+    """
+    Detect the dependency file type by name and route to the
+    correct parser. Returns (packages, skipped, ecosystem_label).
+    """
+    filename = Path(file_path).name.lower()
+
+    if filename == "package-lock.json":
+        packages, skipped = parse_package_lock(file_path)
+        return packages, skipped, "npm (package-lock.json)"
+
+    if filename == "package.json":
+        packages, skipped = parse_package_json(file_path)
+        return packages, skipped, "npm (package.json — version ranges, less precise)"
+
+    # Default: treat as a Python requirements file
+    packages, skipped = parse_requirements(file_path)
+    return packages, skipped, "Python (requirements.txt)"
 
 
 def run_pipeline(file_path: str, nvd_api_key: str = "") -> list:
@@ -45,23 +74,32 @@ def run_pipeline(file_path: str, nvd_api_key: str = "") -> list:
     print(f"{'='*60}\n")
 
     # ── Stage 1: Parse ─────────────────────────────────────────────
-    print("  [Stage 1/3] Parsing requirements...")
+    print("  [Stage 1/4] Parsing dependency file...")
     try:
-        packages, skipped = parse_requirements(file_path)
+        packages, skipped, ecosystem_label = detect_and_parse(file_path)
     except (FileNotFoundError, ValueError) as e:
         print(f"\n  Error: {e}")
         sys.exit(1)
 
-    summarize_parse(packages, skipped)
+    print(f"  Detected: {ecosystem_label}")
+
+    if ecosystem_label.startswith("Python"):
+        summarize_parse(packages, skipped)
+    else:
+        direct = sum(1 for p in packages if p.get("is_direct"))
+        print(f"  Total packages : {len(packages)}")
+        print(f"  Direct deps    : {direct}")
+        print(f"  Transitive     : {len(packages) - direct}")
+        print(f"  Skipped        : {len(skipped)}\n")
 
     # ── Stage 2: Enrich ────────────────────────────────────────────
-    print("  [Stage 2/3] Enriching with CVE / KEV / EPSS data...")
+    print("  [Stage 2/4] Enriching with CVE / KEV / EPSS data...")
     config = EnricherConfig(nvd_api_key=nvd_api_key)
     enriched = enrich_all(packages, config)
     print_enrichment_summary(enriched)
 
     # ── Stage 3: Score ─────────────────────────────────────────────
-    print("  [Stage 3/3] Scoring and ranking packages...")
+    print("  [Stage 3/4] Scoring and ranking packages...")
     scored = score_all(enriched)
     print_score_report(scored)
 

@@ -1,15 +1,16 @@
 """
 remediation.py
 --------------
-Fetches the latest safe version of a package from PyPI and generates
+Fetches the latest safe version of a package from the appropriate
+registry (PyPI for Python, npm registry for JavaScript) and generates
 a concrete remediation recommendation per risky package.
 
 For each scored package it answers:
-  - What is the latest available version on PyPI?
+  - What is the latest available version in its registry?
   - Is the current version outdated?
   - What should the user do — upgrade, pin, or replace?
 
-Uses PyPI's public JSON API — no key required.
+Both PyPI and npm registry APIs are public — no key required.
 """
 
 import time
@@ -17,11 +18,12 @@ import requests
 
 
 PYPI_API = "https://pypi.org/pypi/{package}/json"
+NPM_API  = "https://registry.npmjs.org/{package}/latest"
 
 
-# ── PyPI lookup ────────────────────────────────────────────────────────────────
+# ── Registry lookups ──────────────────────────────────────────────────────────
 
-def fetch_latest_version(package_name: str) -> str | None:
+def fetch_latest_pypi_version(package_name: str) -> str | None:
     """
     Fetch the latest stable version of a package from PyPI.
     Returns version string like "2.31.0", or None if lookup fails.
@@ -39,6 +41,33 @@ def fetch_latest_version(package_name: str) -> str | None:
         return None
 
 
+def fetch_latest_npm_version(package_name: str) -> str | None:
+    """
+    Fetch the latest stable version of a package from the npm registry.
+    Returns version string like "1.17.0", or None if lookup fails.
+    """
+    url = NPM_API.format(package=package_name)
+    try:
+        time.sleep(0.3)  # being polite to npm registry
+        response = requests.get(url, timeout=10)
+        if response.status_code == 404:
+            return None  # package not found on npm
+        response.raise_for_status()
+        data = response.json()
+        return data.get("version")
+    except requests.RequestException:
+        return None
+
+
+def fetch_latest_version(package_name: str, ecosystem: str = "pypi") -> str | None:
+    """
+    Dispatch to the correct registry based on ecosystem.
+    """
+    if ecosystem == "npm":
+        return fetch_latest_npm_version(package_name)
+    return fetch_latest_pypi_version(package_name)
+
+
 # ── Remediation logic ──────────────────────────────────────────────────────────
 
 def generate_remediation(scored_package: dict, latest_version: str | None) -> dict:
@@ -49,19 +78,19 @@ def generate_remediation(scored_package: dict, latest_version: str | None) -> di
     {
         "action":       str,   # UPGRADE / PIN / MONITOR / REPLACE / INVESTIGATE
         "reason":       str,   # one-line explanation
-        "suggestion":   str,   # concrete thing to put in requirements.txt
-        "latest":       str,   # latest PyPI version or None
+        "suggestion":   str,   # concrete fix — syntax depends on ecosystem
+        "latest":       str,   # latest registry version or None
         "is_outdated":  bool,  # current version != latest
     }
     """
     name        = scored_package["name"]
     version     = scored_package.get("version")
     pinned      = scored_package.get("pinned", False)
+    ecosystem   = scored_package.get("ecosystem", "pypi")
     score       = scored_package["score"]
     label       = score["label"]
     findings    = scored_package["findings"]
     any_kev     = findings["any_kev"]
-    total_cves  = findings["total_cves"]
 
     is_outdated = (
         bool(latest_version)
@@ -69,22 +98,30 @@ def generate_remediation(scored_package: dict, latest_version: str | None) -> di
         and version != latest_version
     )
 
+    # Ecosystem-specific version pin syntax
+    def pin(v: str) -> str:
+        if ecosystem == "npm":
+            return f"{name}@{v}"
+        return f"{name}=={v}"
+
+    registry_name = "npm registry" if ecosystem == "npm" else "PyPI"
+
     # ── Determine action and suggestion ───────────────────────────────────────
 
     if label == "CRITICAL" and any_kev:
         action     = "UPGRADE IMMEDIATELY"
         reason     = "Actively exploited vulnerability — treat as incident-level priority"
-        suggestion = f"{name}=={latest_version}" if latest_version else f"upgrade {name} — check PyPI for latest"
+        suggestion = pin(latest_version) if latest_version else f"upgrade {name} — check {registry_name} for latest"
 
     elif label == "CRITICAL":
         action     = "UPGRADE NOW"
         reason     = "Critical severity CVE with high exploitation probability"
-        suggestion = f"{name}=={latest_version}" if latest_version else f"upgrade {name} — check PyPI for latest"
+        suggestion = pin(latest_version) if latest_version else f"upgrade {name} — check {registry_name} for latest"
 
     elif label == "HIGH" and is_outdated:
         action     = "UPGRADE"
         reason     = "High severity CVE and a newer version is available"
-        suggestion = f"{name}=={latest_version}"
+        suggestion = pin(latest_version)
 
     elif label == "HIGH" and not is_outdated:
         action     = "INVESTIGATE"
@@ -94,7 +131,7 @@ def generate_remediation(scored_package: dict, latest_version: str | None) -> di
     elif label == "MEDIUM" and is_outdated:
         action     = "UPGRADE"
         reason     = "Newer version available — likely includes security fixes"
-        suggestion = f"{name}=={latest_version}"
+        suggestion = pin(latest_version)
 
     elif label == "MEDIUM":
         action     = "MONITOR"
@@ -104,7 +141,7 @@ def generate_remediation(scored_package: dict, latest_version: str | None) -> di
     elif not pinned and latest_version:
         action     = "PIN VERSION"
         reason     = "Unpinned dependency can silently upgrade to a vulnerable version"
-        suggestion = f"{name}=={latest_version}"
+        suggestion = pin(latest_version)
 
     else:
         action     = "NO ACTION"
@@ -124,9 +161,10 @@ def generate_remediation(scored_package: dict, latest_version: str | None) -> di
 
 def add_remediation(scored_packages: list) -> list:
     """
-    Fetch latest PyPI versions and attach remediation to all scored packages.
-    Only fetches PyPI data for packages with risk score > 0 or unpinned.
-    Clean packages with no findings get a lightweight no-action entry.
+    Fetch latest registry versions (PyPI or npm) and attach remediation
+    to all scored packages. Only fetches registry data for packages with
+    risk score > 0 or unpinned. Clean packages get a lightweight
+    no-action entry.
     """
     print(f"\n{'='*50}")
     print(f"  AgentSCM — Remediation Suggestions")
@@ -137,11 +175,13 @@ def add_remediation(scored_packages: list) -> list:
         score = p["score"]["total"]
         pinned = p.get("pinned", False)
         name = p["name"]
+        ecosystem = p.get("ecosystem", "pypi")
+        registry = "npm" if ecosystem == "npm" else "PyPI"
 
-        # Only hit PyPI if there's something to say
+        # Only hit the registry if there's something to say
         if score > 0 or not pinned:
-            print(f"  [PyPI] Checking latest version for {name}...")
-            latest = fetch_latest_version(name)
+            print(f"  [{registry}] Checking latest version for {name}...")
+            latest = fetch_latest_version(name, ecosystem)
         else:
             latest = None
 
