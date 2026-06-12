@@ -4,19 +4,20 @@
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-An agentic open-source dependency threat detection platform that analyzes your Python project's dependencies, correlates them with live vulnerability intelligence, and prioritizes the ones that need immediate action.
+An agentic supply chain threat detection platform that analyzes your project's dependencies— Python or npm, and correlates them with live vulnerability intelligence, and prioritizes the ones that need immediate action.
 
 ## What it does
 
-- Parses your `requirements.txt` into a clean package inventory
+- Parses `requirements.txt` (Python) or `package-lock.json` (npm) into a clean package inventory
 - Enriches each package with CVE data (NVD), active exploitation status (CISA KEV), and exploit likelihood (EPSS)
-- Scores risk using severity + exploitation context + dependency signals
-- Generates analyst-ready findings with remediation recommendations
+- Scores and ranks risk using severity + exploitation context + pinning status
+- Suggests corresponding remediation — exact upgrade version pulled from PyPI or npm registry
+- Generates analyst-ready findings with recommended actions
 - Displays results in an interactive dashboard
 
 ## Why it matters
 
-Most vulnerability scanners dump every CVE and leave us to figure out what matters. This tool prioritizes a CVE that's being actively exploited and has a 90% EPSS score is not the same as a theoretical low-severity issue from 3 years ago.
+Most vulnerability scanners dump every CVE and leave us to figure out what matters. This tool prioritizes a CVE that's being actively exploited and has a 90% EPSS score is not the same as a theoretical low-severity issue from long time ago.
 
 ## Dashboard
 
@@ -28,6 +29,8 @@ Most vulnerability scanners dump every CVE and leave us to figure out what matte
 - NVD API (CVE data)
 - CISA KEV (active exploitation watchlist)
 - FIRST EPSS API (exploit probability scoring)
+- PyPI API (Python remediation — latest safe version)
+- npm Registry API (npm remediation — latest safe version)
 - Streamlit (dashboard)
 
 
@@ -37,16 +40,19 @@ Most vulnerability scanners dump every CVE and leave us to figure out what matte
 AgentSCM/
 ├── src/
 │   ├── parser.py        # Stage 1: Parse requirements.txt
+│   ├── parser_npm.py    # Stage 1: Parse package-lock.json (npm)
 │   ├── enricher.py      # Stage 2: Fetch CVE/KEV/EPSS data
 │   ├── scorer.py        # Stage 3: Risk scoring and ranking
-│   ├── pipeline.py      # Stage 4: Wires all stages, main entry point
-│   ├── dashboard.py     # Stage 5: Streamlit dashboard
-│   └── remediation.py   # Stage 6: PyPI latest version + remediation suggestions 
+│   ├── remediation.py   # Stage 4: PyPI/npm latest version + remediation suggestions
+│   ├── pipeline.py      # Stage 5: Main entry point- wires all stages
+│   └── dashboard.py     # Stage 6: Streamlit dashboard
 ├── data/
-│   └── samples/         # Sample requirements files for testing
-├── tests/
-├── .env                 # Your API keys — never committed
-└── requirements.txt
+│   └── samples/         # Sample requirements.txt and package-lock.json for testing
+├── .github/
+│   └── workflows/       # GitHub Actions CI — supply chain scan on every PR
+├── docs/
+└── .env                 # Your API keys — never committed
+
 ```
 
 ## Risk scoring
@@ -85,11 +91,16 @@ Add the '.env' to '.gitignore'
 
 ## Usage
  
-Run the full pipeline on any `requirements.txt`:
+Run the full pipeline — AgentSCM auto-detects the file type:
  
 ```bash
+# Python projects
 python src/pipeline.py data/samples/requirements.txt
 python src/pipeline.py /path/to/your/project/requirements.txt
+ 
+# npm projects
+python src/pipeline.py data/samples/package-lock.json
+python src/pipeline.py /path/to/your/project/package-lock.json
 ```
  
 Results are printed to terminal and saved to `data/results.json`.
@@ -127,6 +138,8 @@ Then open http://localhost:8501 in your browser. Upload any `requirements.txt` o
      • numpy
 ```
 
+npm projects produce the same report shape, with `@` version syntax (e.g. `axios@1.17.0`) and npm registry lookups instead of PyPI.
+
 ---
 
 Built as a project demonstrating supply-chain security analysis, threat intelligence enrichment, and detection engineering principles.
@@ -138,19 +151,19 @@ Built as a project demonstrating supply-chain security analysis, threat intellig
 | Feature | Reason |
 |---|---|
 | Streamlit dashboard | ✅ Done |
-| Remediation suggestions per package | ✅ Done |
+| npm / package-lock.json support | ✅ Done — ecosystem-aware enrichment + npm registry remediation |
+| Remediation suggestions per package | ✅ Done — PyPI/npm latest version lookup with action per package |
 | Exportable JSON report | ✅ Done |
 | GitHub Actions CI integration | ✅ Done |
  
-### 🟢 Should have (next version)
+### 🟢 Should have
 | Feature | Reason |
 |---|---|
-| npm / package-lock.json support | Expands beyond Python, making it ecosystem-agnostic |
 | `poetry.lock` support | Most modern Python projects support |
 | Dependency graph view | Visualize direct vs transitive risk paths |
 | CycloneDX SBOM input | Formal SBOM support for enterprise and DevSecOps credibility |
  
-### 🟡 Could have (next version)
+### 🟡 Could have
 | Feature | Reason |
 |---|---|
 | Fresh exploit signal ingestion | Paste a CVE or advisory and checks if packages are affected |
