@@ -105,8 +105,8 @@ with col1:
 
 with col2:
     st.markdown("**Don't have one handy?**")
-    use_sample = st.button("▶ Run with sample (Python)", use_container_width=True)
-    use_sample_npm = st.button("▶ Run with sample (npm)", use_container_width=True)
+    use_sample = st.button("▶ Run with sample (Python)", width="stretch")
+    use_sample_npm = st.button("▶ Run with sample (npm)", width="stretch")
 
 # ── Pipeline execution ─────────────────────────────────────────────────────────
 
@@ -175,7 +175,7 @@ def render_results(scored: list, skipped_count: int) -> None:
             "Score":       s["total"],
             "Risk":        f"{s['emoji']} {s['label']}",
             "CVEs":        f["total_cves"],
-            "CVSS":        f["highest_cvss"] or "—",
+            "CVSS":        f["highest_cvss"] if f["highest_cvss"] else None,
             "EPSS":        f"{f['highest_epss']:.0%}" if f["highest_epss"] else "—",
             "In KEV":      kev,
             "Pinned":      "✓" if p.get("pinned") else "✗",
@@ -185,7 +185,7 @@ def render_results(scored: list, skipped_count: int) -> None:
 
     st.dataframe(
         table_data,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "Score": st.column_config.ProgressColumn(
@@ -249,7 +249,7 @@ def render_results(scored: list, skipped_count: int) -> None:
                             "In KEV":      "⚠️ Yes" if cve.get("in_kev") else "—",
                             "Published":   cve.get("published_date", "—"),
                         })
-                    st.dataframe(cve_rows, use_container_width=True, hide_index=True)
+                    st.dataframe(cve_rows, width="stretch", hide_index=True)
 
                     st.markdown("**Description:**")
                     st.caption(top_cves[0].get("description", "No description available."))
@@ -259,6 +259,86 @@ def render_results(scored: list, skipped_count: int) -> None:
             for p in clean:
                 version = f"{p.get('version_spec','') or ''}{p.get('version','') or ''}".strip() or "unpinned"
                 st.markdown(f"- `{p['name']}` ({version})")
+
+    # ── Migration Risk Checker ────────────────────────────────────────────────
+    st.divider()
+    st.subheader("🧪 Migration Risk Checker")
+    st.caption(
+        "Before upgrading a flagged package, check whether the new version "
+        "actually breaks **your specific usage** of it — not just whether the "
+        "version number jumped. Runs entirely locally; nothing leaves your machine."
+    )
+
+    upgradeable = [
+        p for p in scored
+        if p.get("remediation", {}).get("latest")
+        and p.get("ecosystem", "pypi") == "pypi"  # migration analysis currently Python-only
+    ]
+
+    if not upgradeable:
+        st.info("No Python packages with a suggested upgrade to check.")
+    else:
+        col_a, col_b = st.columns([2, 1])
+        with col_a:
+            package_choice = st.selectbox(
+                "Package to check",
+                options=[p["name"] for p in upgradeable],
+                help="Only Python packages with a suggested upgrade are shown."
+            )
+        with col_b:
+            codebase_path = st.text_input(
+                "Path to your codebase",
+                value=".",
+                help="Local folder path to scan for actual usage of this package."
+            )
+
+        if st.button("🔍 Check migration risk", width="stretch"):
+            chosen = next(p for p in upgradeable if p["name"] == package_choice)
+            current_v = chosen.get("version")
+            target_v = chosen["remediation"]["latest"]
+
+            with st.spinner(
+                f"Downloading {package_choice} {current_v} and {target_v} locally, "
+                f"comparing API surfaces, and scanning your code... (10-30s)"
+            ):
+                try:
+                    from src.migration_analyzer import analyze_migration_risk
+                    report = analyze_migration_risk(
+                        package_name=package_choice,
+                        current_version=current_v,
+                        target_version=target_v,
+                        codebase_path=codebase_path,
+                    )
+                except Exception as e:
+                    report = {"status": "ERROR", "error": str(e), "breaking_changes": [],
+                              "usages_found": 0, "total_api_changes": 0}
+
+            status = report["status"]
+
+            if report.get("error"):
+                st.warning(f"Could not complete analysis: {report['error']}")
+            elif status == "SAFE":
+                st.success(
+                    f"✅ Safe to upgrade {package_choice} {current_v} → {target_v}. "
+                    f"Found {report['usages_found']} usage site(s) in your code — "
+                    f"none are affected by the {report['total_api_changes']} API change(s) "
+                    f"between versions."
+                )
+            elif status == "RISKY":
+                st.error(
+                    f"⚠️ Upgrading {package_choice} {current_v} → {target_v} may break your code:"
+                )
+                for change in report["breaking_changes"]:
+                    st.markdown(f"**{change.detail}**")
+                    for site in change.usage_sites[:5]:
+                        st.caption(f"　used at `{site.file}:{site.line}`")
+
+            st.caption(
+                "Known limitation: static analysis can't see APIs generated dynamically "
+                "at runtime, and class-hierarchy refactors (methods moved to a shared base "
+                "class) aren't always disambiguated perfectly. Treat findings as a strong "
+                "signal, not a guarantee — review the actual changelog for anything flagged."
+            )
 
     # ── Download ───────────────────────────────────────────────────────────────
     st.divider()
@@ -286,7 +366,7 @@ def render_results(scored: list, skipped_count: int) -> None:
         data=json.dumps(export, indent=2),
         file_name="agentscm_report.json",
         mime="application/json",
-        use_container_width=True,
+        width="stretch",
     )
 
     if skipped_count:
