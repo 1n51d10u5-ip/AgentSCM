@@ -56,13 +56,14 @@ def detect_and_parse(file_path: str):
     return packages, skipped, "Python (requirements.txt)"
 
 
-def run_pipeline(file_path: str, nvd_api_key: str = "") -> list:
+def run_pipeline(file_path: str, nvd_api_key: str = "", vulncheck_api_key: str = "") -> list:
     """
     Run the full AgentSCM pipeline on a requirements.txt file.
 
     Args:
-        file_path:   path to requirements.txt
-        nvd_api_key: NVD API key (loaded from .env by default)
+        file_path:           path to requirements.txt or package-lock.json
+        nvd_api_key:         NVD API key (loaded from .env by default)
+        vulncheck_api_key:   VulnCheck token for NVD++ and KEV fallback
 
     Returns:
         List of scored + enriched package dicts, sorted by risk score.
@@ -94,7 +95,10 @@ def run_pipeline(file_path: str, nvd_api_key: str = "") -> list:
 
     # ── Stage 2: Enrich ────────────────────────────────────────────
     print("  [Stage 2/4] Enriching with CVE / KEV / EPSS data...")
-    config = EnricherConfig(nvd_api_key=nvd_api_key)
+    config = EnricherConfig(
+        nvd_api_key=nvd_api_key,
+        vulncheck_api_key=vulncheck_api_key,
+    )
     enriched = enrich_all(packages, config)
     print_enrichment_summary(enriched)
 
@@ -186,6 +190,7 @@ def print_action_summary(scored: list) -> None:
 if __name__ == "__main__":
     load_dotenv()
     nvd_key = os.environ.get("NVD_API_KEY", "")
+    vulncheck_key = os.environ.get("VULNCHECK_API_KEY", "")
 
     if len(sys.argv) < 2:
         print("\n  Usage: python src/pipeline.py <path/to/requirements.txt>")
@@ -194,6 +199,6 @@ if __name__ == "__main__":
 
     file_path = sys.argv[1]
 
-    scored = run_pipeline(file_path, nvd_api_key=nvd_key)
+    scored = run_pipeline(file_path, nvd_api_key=nvd_key, vulncheck_api_key=vulncheck_key)
     print_action_summary(scored)
     save_results(scored)

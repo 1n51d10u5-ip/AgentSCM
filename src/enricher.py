@@ -7,13 +7,18 @@ Stage 2: For each parsed package, fetch security context from 3 sources:
   2. CISA KEV      — is this CVE actively exploited in the wild?
   3. FIRST EPSS    — probability this CVE gets exploited in next 30 days
 
-All three APIs are free and public. NVD works without a key but is
-rate-limited to 5 requests/30s. With a key it allows 50 requests/30s.
+NVD fallback chain (tried in order):
+  1. NIST NVD API (free, but frequently 503s and times out)
+  2. VulnCheck NVD++ (reliable free alternative — set VULNCHECK_API_KEY in .env)
 
-Set your NVD key in a .env file:
-    NVD_API_KEY=your-key-here
+KEV fallback chain (tried in order):
+  1. CISA direct feed
+  2. GitHub mirror (cisagov/kev-data)
+  3. VulnCheck KEV (set VULNCHECK_API_KEY in .env)
 
-Or pass it directly to EnricherConfig.
+Set your keys in a .env file:
+    NVD_API_KEY=your-nvd-key
+    VULNCHECK_API_KEY=your-vulncheck-token
 """
 
 import os
@@ -27,12 +32,16 @@ from dataclasses import dataclass, field
 @dataclass
 class EnricherConfig:
     nvd_api_key: str = ""
+    vulncheck_api_key: str = ""
     nvd_base_url: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    vulncheck_nvd_url: str = "https://api.vulncheck.com/v3/index/nist-nvd2"
     kev_url: str = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
     kev_fallback_url: str = "https://raw.githubusercontent.com/cisagov/kev-data/main/known_exploited_vulnerabilities.json"
+    vulncheck_kev_url: str = "https://api.vulncheck.com/v3/index/vulncheck-kev"
     epss_base_url: str = "https://api.first.org/data/v1/epss"
 
     # Rate limiting: NVD allows 5 req/30s without key, 50 req/30s with key
+    # VulnCheck has generous rate limits for community tier
     request_delay: float = field(init=False)
 
     def __post_init__(self):
@@ -50,8 +59,11 @@ _kev_loaded: bool = False
 def load_kev_catalog(config: EnricherConfig) -> set:
     """
     Download CISA KEV catalog once and return a set of CVE IDs.
-    Tries CISA directly first, falls back to GitHub mirror.
-    Uses a module-level cache so we only fetch it once per session.
+
+    Fallback chain:
+      1. CISA direct
+      2. GitHub mirror
+      3. VulnCheck KEV (if VULNCHECK_API_KEY set)
     """
     global _kev_cache, _kev_loaded
 
@@ -59,25 +71,48 @@ def load_kev_catalog(config: EnricherConfig) -> set:
         return _kev_cache
 
     print("  [KEV] Downloading CISA Known Exploited Vulnerabilities catalog...")
-    urls_to_try = [config.kev_url, config.kev_fallback_url]
 
-    for url in urls_to_try:
+    # Sources 1 & 2: CISA and GitHub mirror (same JSON format)
+    standard_urls = [
+        (config.kev_url, "CISA", None),
+        (config.kev_fallback_url, "GitHub mirror", None),
+    ]
+
+    for url, source_name, headers in standard_urls:
         try:
-            response = requests.get(url, timeout=15)
+            response = requests.get(url, headers=headers or {}, timeout=15)
             response.raise_for_status()
             data = response.json()
-
             _kev_cache = {
                 vuln["cveID"]
                 for vuln in data.get("vulnerabilities", [])
             }
             _kev_loaded = True
-            source = "CISA" if url == config.kev_url else "GitHub mirror"
-            print(f"  [KEV] Loaded {len(_kev_cache)} known exploited CVEs (source: {source}).")
+            print(f"  [KEV] Loaded {len(_kev_cache)} known exploited CVEs (source: {source_name}).")
             return _kev_cache
-
         except requests.RequestException as e:
-            print(f"  [KEV] Could not load from {url}: {e}")
+            print(f"  [KEV] Could not load from {source_name}: {e}")
+
+    # Source 3: VulnCheck KEV (different JSON format — paginated)
+    if config.vulncheck_api_key:
+        try:
+            print("  [KEV] Trying VulnCheck KEV as fallback...")
+            headers = {"Authorization": f"Bearer {config.vulncheck_api_key}"}
+            response = requests.get(config.vulncheck_kev_url, headers=headers, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            # VulnCheck KEV format: data._note or data.data list with cve field
+            _kev_cache = set()
+            for item in data.get("data", []):
+                # Each item may have a list of CVE IDs
+                for cve in item.get("cve", []):
+                    if isinstance(cve, str):
+                        _kev_cache.add(cve)
+            _kev_loaded = True
+            print(f"  [KEV] Loaded {len(_kev_cache)} known exploited CVEs (source: VulnCheck KEV).")
+            return _kev_cache
+        except requests.RequestException as e:
+            print(f"  [KEV] Could not load from VulnCheck KEV: {e}")
 
     print("  [KEV] Warning: All KEV sources failed. KEV enrichment disabled.")
     _kev_cache = set()
@@ -91,40 +126,64 @@ def fetch_nvd_cves(package: dict, config: EnricherConfig) -> list:
     """
     Query NVD for CVEs matching this package name and version.
 
+    Fallback chain:
+      1. NIST NVD API (primary)
+      2. VulnCheck NVD++ (fallback if NIST times out or 503s)
+
+    Both return the same NVD 2.0 JSON format — VulnCheck is a
+    drop-in replacement with the same response structure.
+
     Returns a list of CVE dicts, each with:
         cve_id, description, cvss_score, cvss_severity, published_date
     """
-    headers = {}
-    if config.nvd_api_key:
-        headers["apiKey"] = config.nvd_api_key
-
-    # For npm packages with generic names (express, moment, etc.), bias the
-    # search toward npm-specific CVEs to reduce false positives. PyPI package
-    # names are usually distinctive enough that this isn't needed.
     ecosystem = package.get("ecosystem", "pypi")
-    if ecosystem == "npm":
-        keyword = f"npm {package['name']}"
-    else:
-        keyword = package["name"]
+    keyword = f"npm {package['name']}" if ecosystem == "npm" else package["name"]
+    params = {"keywordSearch": keyword, "resultsPerPage": 10}
 
-    params = {
-        "keywordSearch": keyword,
-        "resultsPerPage": 10,
-    }
+    # Try NIST NVD first
+    nvd_headers = {}
+    if config.nvd_api_key:
+        nvd_headers["apiKey"] = config.nvd_api_key
 
+    data = None
     try:
         time.sleep(config.request_delay)
         response = requests.get(
             config.nvd_base_url,
-            headers=headers,
+            headers=nvd_headers,
             params=params,
             timeout=15
         )
         response.raise_for_status()
         data = response.json()
-
+        source = "NVD"
     except requests.RequestException as e:
-        print(f"  [NVD] Warning: Could not fetch CVEs for {package['name']}: {e}")
+        print(f"  [NVD] NIST NVD failed for {package['name']}: {e}")
+
+        # Fallback to VulnCheck NVD++
+        if config.vulncheck_api_key:
+            try:
+                print(f"  [NVD] Trying VulnCheck NVD++ fallback for {package['name']}...")
+                vc_headers = {"Authorization": f"Bearer {config.vulncheck_api_key}"}
+                response = requests.get(
+                    config.vulncheck_nvd_url,
+                    headers=vc_headers,
+                    params=params,
+                    timeout=15
+                )
+                response.raise_for_status()
+                # VulnCheck NVD++ wraps the NVD 2.0 response under a "data" key
+                raw = response.json()
+                data = {"vulnerabilities": raw.get("data", [])}
+                source = "VulnCheck NVD++"
+            except requests.RequestException as e2:
+                print(f"  [NVD] VulnCheck NVD++ also failed for {package['name']}: {e2}")
+                return []
+        else:
+            print(f"  [NVD] No VULNCHECK_API_KEY set — skipping fallback. Add it to .env to enable.")
+            return []
+
+    if data is None:
         return []
 
     cves = []
@@ -293,15 +352,22 @@ if __name__ == "__main__":
     sys.path.insert(0, ".")
     from src.parser import parse_requirements
 
-    # Load .env securely
+    # Load .env directly — no separate config file needed
     load_dotenv()
-
-    config = EnricherConfig(nvd_api_key=os.environ.get("NVD_API_KEY", ""))
+    config = EnricherConfig(
+        nvd_api_key=os.environ.get("NVD_API_KEY", ""),
+        vulncheck_api_key=os.environ.get("VULNCHECK_API_KEY", ""),
+    )
 
     if config.nvd_api_key:
         print("  NVD API key loaded ✓")
     else:
-        print("  No NVD API key found — slower unauthenticated mode")
+        print("  No NVD API key — unauthenticated mode")
+
+    if config.vulncheck_api_key:
+        print("  VulnCheck API key loaded ✓ (NVD++ fallback enabled)")
+    else:
+        print("  No VulnCheck API key — add VULNCHECK_API_KEY to .env for NVD fallback")
 
     file = sys.argv[1] if len(sys.argv) > 1 else "data/samples/requirements.txt"
     packages, _ = parse_requirements(file)

@@ -66,15 +66,27 @@ with st.sidebar:
 
     nvd_key = os.environ.get("NVD_API_KEY", "")
     if nvd_key:
-        st.success("NVD API key loaded from .env ✓")
+        st.success("NVD API key loaded ✓")
     else:
         nvd_key = st.text_input(
             "NVD API key (optional)",
             type="password",
-            help="Without a key, NVD requests are rate-limited to 5/30s (slower). Get a free key at nvd.nist.gov/developers/request-an-api-key"
+            help="Without a key, NVD requests are rate-limited to 5/30s. Get a free key at nvd.nist.gov/developers/request-an-api-key"
         )
         if not nvd_key:
-            st.warning("No API key — running in slow mode")
+            st.warning("No NVD key — slow mode")
+
+    vulncheck_key = os.environ.get("VULNCHECK_API_KEY", "")
+    if vulncheck_key:
+        st.success("VulnCheck NVD++ fallback enabled ✓")
+    else:
+        vulncheck_key = st.text_input(
+            "VulnCheck API key (recommended)",
+            type="password",
+            help="Free at vulncheck.com — enables reliable NVD++ fallback when NIST NVD is down (which is often)."
+        )
+        if not vulncheck_key:
+            st.info("Add VulnCheck key for NVD fallback")
 
     st.divider()
     st.markdown("**Data sources**")
@@ -110,10 +122,13 @@ with col2:
 
 # ── Pipeline execution ─────────────────────────────────────────────────────────
 
-def run_pipeline(file_path: str, nvd_api_key: str) -> tuple:
+def run_pipeline(file_path: str, nvd_api_key: str, vulncheck_api_key: str = "") -> tuple:
     """Run full AgentSCM pipeline and return scored packages + metadata."""
     packages, skipped, ecosystem_label = detect_and_parse(file_path)
-    config = EnricherConfig(nvd_api_key=nvd_api_key)
+    config = EnricherConfig(
+        nvd_api_key=nvd_api_key,
+        vulncheck_api_key=vulncheck_api_key,
+    )
     enriched = enrich_all(packages, config)
     scored = score_all(enriched)
     scored = add_remediation(scored)
@@ -313,7 +328,11 @@ if uploaded_file or use_sample or use_sample_npm:
                 with open(file_path, "wb") as f:
                     f.write(uploaded_file.read())
 
-            scored, skipped_count, ecosystem_label = run_pipeline(file_path, nvd_api_key=nvd_key)
+            scored, skipped_count, ecosystem_label = run_pipeline(
+                file_path,
+                nvd_api_key=nvd_key,
+                vulncheck_api_key=vulncheck_key,
+            )
             st.caption(f"📦 Detected: **{ecosystem_label}**")
             render_results(scored, skipped_count)
 
