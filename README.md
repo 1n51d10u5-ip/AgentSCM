@@ -9,7 +9,7 @@ An agentic supply chain threat detection platform that analyzes your project's d
 ## What it does
 
 - Parses `requirements.txt` (Python) or `package-lock.json` (npm) into a clean package inventory
-- Enriches each package with CVE data (NVD), active exploitation status (CISA KEV), and exploit likelihood (EPSS)
+- Enriches each package with CVE data (OSV), active exploitation status (CISA KEV), and exploit likelihood (EPSS)
 - Scores and ranks risk using severity + exploitation context + pinning status
 - Suggests corresponding remediation — exact upgrade version pulled from PyPI or npm registry
 - Generates analyst-ready findings with recommended actions
@@ -26,7 +26,7 @@ Most vulnerability scanners dump every CVE and leave us to figure out what matte
 ## Tech stack
 
 - Python 3.11+
-- NVD API (CVE data)
+- OSV API (CVE data — no key required)
 - CISA KEV (active exploitation watchlist)
 - FIRST EPSS API (exploit probability scoring)
 - PyPI API (Python remediation — latest safe version)
@@ -55,22 +55,6 @@ AgentSCM/
 
 ```
 
-## Risk scoring
-
-Each package is scored 0–100 based on four signals:
-
-| Signal | Points |
-|---|---|
-| Critical CVE (CVSS 9–10) | 40 |
-| High CVE (CVSS 7–8.9) | 25 |
-| Medium CVE (CVSS 4–6.9) | 10 |
-| In CISA KEV (actively exploited) | +30 |
-| High EPSS >70% | +20 |
-| Moderate EPSS 40–70% | +10 |
-| Version not pinned | +5 |
-
-Scores map to: 🔴 CRITICAL (70+) · 🟠 HIGH (40–69) · 🟡 MEDIUM (15–39) · 🟢 LOW (0–14)
-
 ## Setup
 
 ```bash
@@ -80,14 +64,13 @@ pip install -r requirements.txt #To install this program's dependencies
 
 ```
 
-Create a `.env` file in the project root:
+No API keys required to run. Optionally, add a VulnCheck token to your `.env` for KEV fallback if CISA's feed is unavailable:
+ 
 ```
-NVD_API_KEY=your-key-here
+VULNCHECK_API_KEY=your-token-here
 ```
-
-Get a free NVD API key at: https://nvd.nist.gov/developers/request-an-api-key
-
-Add the '.env' to '.gitignore'
+ 
+Get a free VulnCheck token at: https://vulncheck.com
 
 ## Usage
  
@@ -111,7 +94,7 @@ Or launch the interactive dashboard:
 streamlit run src/dashboard.py
 ```
  
-Then open http://localhost:8501 in your browser. Upload any `requirements.txt` or click "Run with sample file" to see a demo.
+Then open http://localhost:8501 in your browser. Upload any `requirements.txt` or click "Run with sample file" to see live demo.
 
 ## Sample output
  
@@ -125,20 +108,36 @@ Then open http://localhost:8501 in your browser. Upload any `requirements.txt` o
   3    django (==3.2.0)          10       🟢 LOW       2
   4    numpy (unpinned)           5       🟢 LOW       0
  
-  AgentSCM — Recommended Actions
+  AgentSCM — Remediation Report
   ────────────────────────────────────────────────────────────
-  🔴 CRITICAL — Patch or mitigate immediately
-     • pillow
+  🔴 pillow
+     Action  : UPGRADE IMMEDIATELY
+     Reason  : Actively exploited vulnerability (CISA KEV)
+     Fix     : pillow==12.2.0
  
-  🟡 MEDIUM — Review and plan remediation
-     • requests
- 
-  🟢 LOW — Monitor, no immediate action
-     • django
-     • numpy
+  🟠 django
+     Action  : UPGRADE
+     Reason  : Critical severity CVE and newer version available
+     Fix     : django==6.0.6
 ```
+ 
+npm projects produce the same output with `@` version syntax (e.g. `axios@1.17.0`).
 
-npm projects produce the same report shape, with `@` version syntax (e.g. `axios@1.17.0`) and npm registry lookups instead of PyPI.
+## Risk scoring
+
+Each package is scored 0–100 based on four signals:
+
+| Signal | Points |
+|---|---|
+| Critical CVE (CVSS 9–10) | 40 |
+| High CVE (CVSS 7–8.9) | 25 |
+| Medium CVE (CVSS 4–6.9) | 10 |
+| In CISA KEV (actively exploited) | +30 |
+| High EPSS >70% | +20 |
+| Moderate EPSS 40–70% | +10 |
+| Version not pinned | +5 |
+
+Scores map to: 🔴 CRITICAL (70+) · 🟠 HIGH (40–69) · 🟡 MEDIUM (15–39) · 🟢 LOW (0–14)
 
 ---
 
