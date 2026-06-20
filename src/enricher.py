@@ -3,13 +3,13 @@ enricher.py
 -----------
 Stage 2: For each parsed package, fetch security context from 3 sources:
 
-  1. NVD API       — known CVEs and CVSS severity scores
+  1. OSV API       — known CVEs/vulns, purpose-built for package lookups (no API key needed)
   2. CISA KEV      — is this CVE actively exploited in the wild?
   3. FIRST EPSS    — probability this CVE gets exploited in next 30 days
 
-NVD fallback chain (tried in order):
-  1. NIST NVD API (free, but frequently 503s and times out)
-  2. VulnCheck NVD++ (reliable free alternative — set VULNCHECK_API_KEY in .env)
+OSV (Open Source Vulnerabilities) is the primary CVE source — it returns only
+vulnerabilities that actually affect the specific package and version, unlike
+NVD keyword search which returns noisy, unrelated results.
 
 KEV fallback chain (tried in order):
   1. CISA direct feed
@@ -17,8 +17,8 @@ KEV fallback chain (tried in order):
   3. VulnCheck KEV (set VULNCHECK_API_KEY in .env)
 
 Set your keys in a .env file:
-    NVD_API_KEY=your-nvd-key
-    VULNCHECK_API_KEY=your-vulncheck-token
+    NVD_API_KEY=your-nvd-key (optional, kept for legacy)
+    VULNCHECK_API_KEY=your-vulncheck-token (for KEV fallback)
 """
 
 import os
@@ -120,111 +120,119 @@ def load_kev_catalog(config: EnricherConfig) -> set:
     return _kev_cache
 
 
-# ── NVD Lookup ─────────────────────────────────────────────────────────────────
+# ── OSV Lookup ─────────────────────────────────────────────────────────────────
+# OSV (Open Source Vulnerabilities) is purpose-built for package vulnerability
+# lookup by name, ecosystem, and version. Unlike NVD keyword search, it returns
+# ONLY vulnerabilities that actually affect the specific package — no noise.
+# Free, no API key required. Used by pip-audit, Google, and GitHub internally.
 
-def fetch_nvd_cves(package: dict, config: EnricherConfig) -> list:
+OSV_API = "https://api.osv.dev/v1/query"
+
+# Map our ecosystem names to OSV ecosystem names
+OSV_ECOSYSTEM_MAP = {
+    "pypi": "PyPI",
+    "npm":  "npm",
+}
+
+
+def fetch_osv_cves(package: dict) -> list:
     """
-    Query NVD for CVEs matching this package name and version.
+    Query OSV for vulnerabilities affecting this specific package and version.
 
-    Fallback chain:
-      1. NIST NVD API (primary)
-      2. VulnCheck NVD++ (fallback if NIST times out or 503s)
-
-    Both return the same NVD 2.0 JSON format — VulnCheck is a
-    drop-in replacement with the same response structure.
+    OSV is purpose-built for this — no keyword noise, no false positives.
+    Returns only CVEs that actually affect the package name + version given.
 
     Returns a list of CVE dicts, each with:
         cve_id, description, cvss_score, cvss_severity, published_date
     """
     ecosystem = package.get("ecosystem", "pypi")
-    keyword = f"npm {package['name']}" if ecosystem == "npm" else package["name"]
-    params = {"keywordSearch": keyword, "resultsPerPage": 10}
+    osv_ecosystem = OSV_ECOSYSTEM_MAP.get(ecosystem, "PyPI")
 
-    # Try NIST NVD first
-    nvd_headers = {}
-    if config.nvd_api_key:
-        nvd_headers["apiKey"] = config.nvd_api_key
+    payload = {
+        "package": {
+            "name": package["name"],
+            "ecosystem": osv_ecosystem,
+        }
+    }
 
-    data = None
+    # If we have an exact version, include it to get only version-specific vulns
+    if package.get("version") and package.get("pinned"):
+        payload["version"] = package["version"]
+
     try:
-        time.sleep(config.request_delay)
-        response = requests.get(
-            config.nvd_base_url,
-            headers=nvd_headers,
-            params=params,
-            timeout=15
+        response = requests.post(
+            OSV_API,
+            json=payload,
+            timeout=(5, 15)
         )
         response.raise_for_status()
         data = response.json()
-        source = "NVD"
     except requests.RequestException as e:
-        print(f"  [NVD] NIST NVD failed for {package['name']}: {e}")
-
-        # Fallback to VulnCheck NVD++
-        if config.vulncheck_api_key:
-            try:
-                print(f"  [NVD] Trying VulnCheck NVD++ fallback for {package['name']}...")
-                vc_headers = {"Authorization": f"Bearer {config.vulncheck_api_key}"}
-                response = requests.get(
-                    config.vulncheck_nvd_url,
-                    headers=vc_headers,
-                    params=params,
-                    timeout=15
-                )
-                response.raise_for_status()
-                # VulnCheck NVD++ wraps the NVD 2.0 response under a "data" key
-                raw = response.json()
-                data = {"vulnerabilities": raw.get("data", [])}
-                source = "VulnCheck NVD++"
-            except requests.RequestException as e2:
-                print(f"  [NVD] VulnCheck NVD++ also failed for {package['name']}: {e2}")
-                return []
-        else:
-            print(f"  [NVD] No VULNCHECK_API_KEY set — skipping fallback. Add it to .env to enable.")
-            return []
-
-    if data is None:
+        print(f"  [OSV] Failed for {package['name']}: {e}")
         return []
 
     cves = []
-    for item in data.get("vulnerabilities", []):
-        cve = item.get("cve", {})
-        cve_id = cve.get("id", "")
+    for vuln in data.get("vulns", []):
+        # OSV may have multiple IDs (CVE, GHSA, etc.) — prefer CVE
+        aliases = vuln.get("aliases", [])
+        cve_ids = [a for a in aliases if a.startswith("CVE-")]
+        vuln_id = vuln.get("id", "")
+        cve_id = cve_ids[0] if cve_ids else vuln_id
 
-        descriptions = cve.get("descriptions", [])
-        description = next(
-            (d["value"] for d in descriptions if d.get("lang") == "en"),
-            "No description available."
-        )
+        # Get description from summary or details
+        description = vuln.get("summary") or vuln.get("details", "No description available.")
+        description = description[:300] + "..." if len(description) > 300 else description
 
-        # Only keep CVEs that clearly mention this package in the description
-        if package["name"].lower() not in description.lower():
-            continue
-
-        # Extract CVSS score — try v3.1 first, fall back to v3.0, then v2
-        metrics = cve.get("metrics", {})
+        # Extract CVSS from severity — OSV provides severity as a list
         cvss_score = None
         cvss_severity = "UNKNOWN"
 
-        for version_key in ["cvssMetricV31", "cvssMetricV30", "cvssMetricV2"]:
-            metric_list = metrics.get(version_key, [])
-            if metric_list:
-                cvss_data = metric_list[0].get("cvssData", {})
-                cvss_score = cvss_data.get("baseScore")
-                cvss_severity = cvss_data.get("baseSeverity", "UNKNOWN")
+        for severity in vuln.get("severity", []):
+            if severity.get("type") == "CVSS_V3":
+                # OSV provides CVSS as a vector string — extract score from database_specific
+                score = (vuln.get("database_specific") or {}).get("cvss", {})
+                if isinstance(score, dict):
+                    cvss_score = score.get("score")
+                    cvss_severity = score.get("severity", "UNKNOWN")
                 break
 
-        published = cve.get("published", "")[:10]
+        # Also check ecosystem_specific for CVSS scores (PyPI/GitHub format)
+        if cvss_score is None:
+            db_specific = vuln.get("database_specific") or {}
+            if "severity" in db_specific:
+                sev = db_specific["severity"]
+                severity_map = {
+                    "CRITICAL": 9.5, "HIGH": 8.0,
+                    "MODERATE": 6.5, "MEDIUM": 6.5, "LOW": 3.0
+                }
+                cvss_severity = sev.upper() if isinstance(sev, str) else "UNKNOWN"
+                cvss_score = severity_map.get(cvss_severity)
+
+        published = vuln.get("published", "")[:10]
 
         cves.append({
             "cve_id": cve_id,
-            "description": description[:300] + "..." if len(description) > 300 else description,
+            "description": description,
             "cvss_score": cvss_score,
             "cvss_severity": cvss_severity,
             "published_date": published,
         })
 
-    return cves
+    # Deduplicate by cve_id — OSV returns the same CVE from multiple sources
+    # (e.g. GHSA + NVD). Keep the entry with the best CVSS score, or the
+    # first entry if scores are equal (usually the more detailed description).
+    seen = {}
+    for cve in cves:
+        cve_id = cve["cve_id"]
+        if cve_id not in seen:
+            seen[cve_id] = cve
+        else:
+            existing_score = seen[cve_id]["cvss_score"] or 0
+            new_score = cve["cvss_score"] or 0
+            if new_score > existing_score:
+                seen[cve_id] = cve
+
+    return list(seen.values())
 
 
 # ── EPSS Lookup ────────────────────────────────────────────────────────────────
@@ -269,8 +277,8 @@ def enrich_package(package: dict, kev_catalog: set, config: EnricherConfig) -> d
     Returns the package dict with an added 'findings' key containing
     all security context for this package.
     """
-    print(f"  [NVD] Fetching CVEs for {package['name']} ...")
-    cves = fetch_nvd_cves(package, config)
+    print(f"  [OSV] Fetching CVEs for {package['name']} ...")
+    cves = fetch_osv_cves(package)
 
     cve_ids = [c["cve_id"] for c in cves]
     kev_hits = [cve_id for cve_id in cve_ids if cve_id in kev_catalog]

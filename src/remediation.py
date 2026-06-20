@@ -30,7 +30,6 @@ def fetch_latest_pypi_version(package_name: str) -> str | None:
     """
     url = PYPI_API.format(package=package_name)
     try:
-        time.sleep(0.3)  # be polite to PyPI
         response = requests.get(url, timeout=10)
         if response.status_code == 404:
             return None  # package not found on PyPI
@@ -48,7 +47,6 @@ def fetch_latest_npm_version(package_name: str) -> str | None:
     """
     url = NPM_API.format(package=package_name)
     try:
-        time.sleep(0.3)  # being polite to npm registry
         response = requests.get(url, timeout=10)
         if response.status_code == 404:
             return None  # package not found on npm
